@@ -83,6 +83,14 @@ socket.on('broadcastMessage', (msg) => {
   console.log(msg);
 });
 
+socket.on('broadcastImage', (msg) => {
+  const imgTemplate = document.querySelector('#img_template').innerHTML;
+  const msgContainer = document.querySelector('#msg_container');
+
+  const html = ejs.render(imgTemplate, { base64Image: msg });
+  msgContainer.insertAdjacentHTML('beforeend', html);
+});
+
 document.querySelector('#btn').addEventListener('click', (event) => {
   event.preventDefault();
   const textMessage = document.querySelector('#txtMessage');
@@ -93,13 +101,22 @@ document.querySelector('#btn').addEventListener('click', (event) => {
   const html = ejs.render(msgTemplate, { message: msg });
   msgContainer.insertAdjacentHTML('beforeend', html);
 
-
   socket.emit('privateMessage', msg, selectedId, (notify) => {
     console.log('Acknowledgement from server: ', notify);
   });
 
   textMessage.value = '';
   textMessage.focus();
+});
+
+document.querySelector('#txtImage').addEventListener('change', (event) => {
+  const data = event.target.files[0];
+  const reader = new FileReader();
+  reader.readAsDataURL(data);
+  reader.onload = (e) => {
+    const base64Image = e.target.result;
+    socket.emit('sendImage', base64Image);
+  };
 });
 
 socket.on('disconnect', () => {

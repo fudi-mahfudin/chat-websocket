@@ -56,6 +56,10 @@ io.on('connection', (socket) => {
     callback('Messge has been delivered');
   });
 
+  socket.on('sendImage', (base64Image) => {
+    io.emit('broadcastImage', base64Image);
+  });
+
   socket.on('disconnect', () => {
     console.log('Socket connection closed: ', socket.id);
     onlineUsers--;
