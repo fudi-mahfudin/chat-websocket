@@ -1,5 +1,22 @@
 const socket = io({ autoConnect: false });
 
+function getCurrentTime() {
+  return new Intl.DateTimeFormat('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false, // Use 24-hour format
+  }).format(new Date());
+}
+
+function connectNewSocket() {
+  const urlSearchParams = new URLSearchParams(window.location.search);
+  const params = Object.fromEntries(urlSearchParams.entries());
+  console.log(urlSearchParams.entries(), params);
+
+  socket.auth = params;
+  socket.connect();
+}
+
 function onLoad() {
   console.log('complete render html');
   const sessionId = localStorage.getItem('sessionId');
@@ -7,17 +24,17 @@ function onLoad() {
     socket.auth = { sessionId };
     socket.connect();
   } else {
-    const urlSearchParams = new URLSearchParams(window.location.search);
-    const params = Object.fromEntries(urlSearchParams.entries());
-    console.log(urlSearchParams.entries(), params);
-
-    socket.auth = params;
-    socket.connect();
+    connectNewSocket();
   }
 }
 
-let selectedId = '';
-const onUserSelect = (id, username) => {
+let selectedId = 'GROUP';
+
+const onUserSelect = (id, username, el) => {
+  document.querySelectorAll('.person').forEach((person) => {
+    person.classList.remove('active-user');
+  });
+  el.classList.add('active-user');
   selectedId = id;
   const selectedUserTemplate = document.querySelector(
     '#selected_user_template'
@@ -34,22 +51,29 @@ socket.on('connect', () => {
   console.log('Connected to server', socket.id);
 });
 
-socket.on('session', ({ id, sessionId, username }) => {
+socket.on('session', ({ id, sessionId, username, avatar }) => {
   // to attach session on reconnect
   socket.auth = { sessionId };
   socket.id = id;
+  socket.username = username;
+  socket.avatar = avatar;
 
-  // if user is not found then redirect to login page
   if (!username) {
     localStorage.removeItem('sessionId');
-    window.location.href = '/';
-  } else {
-    localStorage.setItem('sessionId', sessionId);
+    socket.emit('removeUser');
+    connectNewSocket();
+    return;
   }
+
+  localStorage.setItem('sessionId', sessionId);
 });
 
 socket.on('userList', (connectedUsers) => {
-  connectedUsers.map((user) => {
+  // Save previous selected user
+  const previousSelectedUser = document.querySelector('.active-user');
+
+  console.log(connectedUsers);
+  connectedUsers.map((user, index) => {
     if (user.id === socket.id) {
       user.self = true;
       user.username = `${user.username} (self)`;
@@ -63,7 +87,6 @@ socket.on('userList', (connectedUsers) => {
     return a.username > b.username ? 1 : 0;
   });
 
-  console.log(connectedUsers);
   const userTemplate = document.querySelector(
     '#msg_userList_template'
   ).innerHTML;
@@ -71,23 +94,48 @@ socket.on('userList', (connectedUsers) => {
 
   const html = ejs.render(userTemplate, { connectedUsers });
   userContainer.innerHTML = html;
+
+  // Initial selected user
+  if (previousSelectedUser && previousSelectedUser.dataset.chat !== 'GROUP') {
+    const selectedUser = connectedUsers.find(
+      (user) => user.id === previousSelectedUser.dataset.chat
+    );
+    onUserSelect(
+      selectedUser.id,
+      selectedUser.username,
+      document.querySelector(`[data-chat="${selectedUser.id}"]`)
+    );
+  } else {
+    onUserSelect('GROUP', 'Group', document.querySelector('.person'));
+  }
 });
 
-socket.on('broadcastMessage', (msg) => {
-  const msgTemplate = document.querySelector('#msg_template').innerHTML;
+socket.on('broadcastMessage', (msg, sender) => {
+  const msgTemplate = document.querySelector('#msg_left_template').innerHTML;
   const msgContainer = document.querySelector('#msg_container');
 
-  const html = ejs.render(msgTemplate, { message: msg });
+  const html = ejs.render(msgTemplate, {
+    message: msg,
+    time: getCurrentTime(),
+    username: sender.username,
+    avatar: sender.avatar,
+  });
   msgContainer.insertAdjacentHTML('beforeend', html);
-
-  console.log(msg);
 });
 
-socket.on('broadcastImage', (msg) => {
-  const imgTemplate = document.querySelector('#img_template').innerHTML;
+socket.on('broadcastImage', (msg, sender) => {
+  let imgTemplate = document.querySelector('#img_left_template').innerHTML;
+  if (sender.id === socket.id) {
+    imgTemplate = document.querySelector('#img_right_template').innerHTML;
+  }
   const msgContainer = document.querySelector('#msg_container');
 
-  const html = ejs.render(imgTemplate, { base64Image: msg });
+  const html = ejs.render(imgTemplate, {
+    base64Image: msg,
+    time: getCurrentTime(),
+    username: sender.username,
+    avatar: sender.avatar,
+  });
   msgContainer.insertAdjacentHTML('beforeend', html);
 });
 
@@ -95,15 +143,26 @@ document.querySelector('#btn').addEventListener('click', (event) => {
   event.preventDefault();
   const textMessage = document.querySelector('#txtMessage');
   const msg = textMessage.value;
-  const msgTemplate = document.querySelector('#msg_template').innerHTML;
+  const msgTemplate = document.querySelector('#msg_right_template').innerHTML;
   const msgContainer = document.querySelector('#msg_container');
 
-  const html = ejs.render(msgTemplate, { message: msg });
+  const html = ejs.render(msgTemplate, {
+    message: msg,
+    time: getCurrentTime(),
+    username: socket.username,
+    avatar: socket.avatar,
+  });
   msgContainer.insertAdjacentHTML('beforeend', html);
 
-  socket.emit('privateMessage', msg, selectedId, (notify) => {
-    console.log('Acknowledgement from server: ', notify);
-  });
+  if (selectedId && selectedId !== 'GROUP') {
+    socket.emit('privateMessage', msg, selectedId, (notify) => {
+      console.log('Acknowledgement from server: ', notify);
+    });
+  } else {
+    socket.emit('groupMessage', msg, (notify) => {
+      console.log('Acknowledgement from server: ', notify);
+    });
+  }
 
   textMessage.value = '';
   textMessage.focus();

@@ -1,6 +1,6 @@
 import express from 'express';
 import { Server } from 'socket.io';
-import { addUser, users } from './controller/user.controller.js';
+import { addUser, removeUser, users } from './controller/user.controller.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -23,6 +23,7 @@ io.use((socket, next) => {
       socket.sessionId = sessionId;
       socket.id = session.id;
       socket.username = session.username;
+      socket.avatar = session.avatar;
       return next();
     }
   }
@@ -30,10 +31,12 @@ io.use((socket, next) => {
   socket.sessionId = Math.random().toString().slice(2);
   socket.id = socket.id;
   socket.username = socket.handshake.auth.username;
+  socket.avatar = `/images/avatar${Math.floor(Math.random() * 3) + 1}.png`;
   addUser({
     id: socket.id,
     username: socket.username,
     sessionId: socket.sessionId,
+    avatar: socket.avatar,
   });
   return next();
 });
@@ -46,18 +49,43 @@ io.on('connection', (socket) => {
     sessionId: socket.sessionId,
     id: socket.id,
     username: socket.username,
+    avatar: socket.avatar,
   });
 
   // emit users list to all clients
   io.emit('userList', users);
 
   socket.on('privateMessage', (msg, selectedClientId, callback) => {
-    socket.to(selectedClientId).emit('broadcastMessage', msg);
-    callback('Messge has been delivered');
+    const sender = {
+      id: socket.id,
+      username: socket.username,
+      avatar: socket.avatar,
+    };
+    socket.to(selectedClientId).emit('broadcastMessage', msg, sender);
+    callback('Private message has been delivered');
+  });
+
+  socket.on('groupMessage', (msg, callback) => {
+    const sender = {
+      id: socket.id,
+      username: socket.username,
+      avatar: socket.avatar,
+    };
+    socket.broadcast.emit('broadcastMessage', msg, sender);
+    callback('Group message has been delivered');
   });
 
   socket.on('sendImage', (base64Image) => {
-    io.emit('broadcastImage', base64Image);
+    const sender = {
+      id: socket.id,
+      username: socket.username,
+      avatar: socket.avatar,
+    };
+    io.emit('broadcastImage', base64Image, sender);
+  });
+
+  socket.on('removeUser', () => {
+    removeUser(socket.id);
   });
 
   socket.on('disconnect', () => {
